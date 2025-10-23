@@ -1,86 +1,35 @@
-name:  SAST - CodeQL / DevSkim / Gitleaks / Composer Audit
+name: "ci(security): SAST - DevSkim, Gitleaks, Composer Audit"
 
 on:
   push:
-    branches: [ "auditoria", "main" ]
-  pull_request:
-    branches: [ "auditoria", "main" ]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  security-events: write
+    branches: [ auditoria ]
 
 jobs:
-  codeql:
-    name:  CodeQL (Análisis de Código)
+  sast:
     runs-on: ubuntu-latest
     steps:
-      - name:  Clonar repositorio
+      - name: Clonar repositorio
         uses: actions/checkout@v4
 
-      - name:  Inicializar CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: php
-
-      - name:  Instalar dependencias Composer
-        run: composer install --no-interaction --prefer-dist
-
-      - name:  Ejecutar CodeQL
-        uses: github/codeql-action/analyze@v3
-
-  devskim:
-    name:  DevSkim (Análisis de Código Inseguro)
-    runs-on: ubuntu-latest
-    needs: codeql
-    steps:
-      - uses: actions/checkout@v4
-      - name:  Instalar .NET SDK
-        uses: actions/setup-dotnet@v3
-      - name:  Instalar DevSkim CLI
-        run: dotnet tool install --global Microsoft.CST.DevSkim.CLI
-      - name:  Ejecutar DevSkim
+      - name: Instalar dependencias Composer
         run: |
-          export PATH="$PATH:$HOME/.dotnet/tools"
-          mkdir -p audit/reports
-          devskim analyze -I app -O audit/reports/devskim-results.sarif -f sarif || true
-      - name:  Subir reporte DevSkim
-        uses: actions/upload-artifact@v4
-        with:
-          name: devskim-report
-          path: audit/reports/devskim-results.sarif
+          sudo apt-get update
+          sudo apt-get install -y composer
+          composer install --no-interaction --no-progress
 
-  gitleaks:
-    name:  Gitleaks (Detección de secretos)
-    runs-on: ubuntu-latest
-    needs: [codeql]
-    steps:
-      - uses: actions/checkout@v4
-      - name:  Ejecutar Gitleaks
-        uses: zricethezav/gitleaks-action@v2
+      - name: Analizar código con DevSkim
+        uses: microsoft/DevSkim-Action@v1
         with:
-          args: detect --source . --report-path audit/reports/gitleaks.json
-      - name:  Subir reporte Gitleaks
-        uses: actions/upload-artifact@v4
-        with:
-          name: gitleaks-report
-          path: audit/reports/gitleaks.json
+          directory-to-scan: .
+          output-filename: audit/reports/devskim-results.sarif
 
-  composer-audit:
-    name:  Auditoría de dependencias PHP
-    runs-on: ubuntu-latest
-    needs: [codeql]
-    steps:
-      - uses: actions/checkout@v4
-      - name:  Instalar dependencias
-        run: composer install --no-interaction --prefer-dist
-      - name:  Ejecutar composer audit
+      - name: Detectar secretos con Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auditoría de dependencias PHP
         run: |
           mkdir -p audit/reports
           composer audit --format=json > audit/reports/composer-audit.json || true
-      - name:  Subir reporte Composer Audit
-        uses: actions/upload-artifact@v4
-        with:
-          name: composer-audit-report
-          path: audit/reports/composer-audit.json
