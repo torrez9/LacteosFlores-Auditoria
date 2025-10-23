@@ -1,0 +1,67 @@
+name:  DAST - OWASP ZAP / SQLMap (Análisis Dinámico)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "auditoria", "main" ]
+  pull_request:
+    branches: [ "auditoria", "main" ]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  zap-scan:
+    name:  OWASP ZAP Full Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name:  Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name:  Lanzar aplicación en servidor local
+        run: |
+          php -S 127.0.0.1:8080 -t public/ &
+          sleep 10
+
+      - name:  Ejecutar OWASP ZAP Scan
+        uses: zaproxy/action-full-scan@v0.9.0
+        with:
+          target: "http://127.0.0.1:8080"
+          cmd_options: "-r audit/reports/zap-report.html -J audit/reports/zap-report.json"
+
+      - name:  Subir reportes de ZAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-reports
+          path: |
+            audit/reports/zap-report.html
+            audit/reports/zap-report.json
+
+  sqlmap:
+    name:  SQLMap (Pruebas de Inyección SQL)
+    runs-on: ubuntu-latest
+    steps:
+      - name:  Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name:  Iniciar servidor PHP
+        run: |
+          php -S 127.0.0.1:8080 -t public/ &
+          sleep 10
+
+      - name:  Escaneo SQLMap
+        run: |
+          mkdir -p audit/reports
+          sudo apt update && sudo apt install -y sqlmap
+          sqlmap -u "http://127.0.0.1:8080" --batch --risk=2 --level=2 --output-dir=audit/reports/sqlmap_scan || true
+
+      - name:  Comprimir resultados SQLMap
+        run: |
+          zip -r audit/reports/sqlmap_results.zip audit/reports/sqlmap_scan || true
+
+      - name:  Subir resultados SQLMap
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlmap-report
+          path: audit/reports/sqlmap_results.zip
